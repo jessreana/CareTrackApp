@@ -75,7 +75,7 @@ const saveData = async (data, uid) => {
 const groupBy = (arr, fn) => { const m = {}; arr.forEach((x) => { const k = fn(x); (m[k] = m[k] || []).push(x); }); return m; };
 const formatDateShort = (d) => { if (!d) return "—"; return new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
 
-const DEFAULT_DATA = { people: [], medications: [], doctors: [], appointments: [], dismissed: [] };
+const DEFAULT_DATA = { people: [], medications: [], doctors: [], appointments: [], dismissed: [], contacts: [] };
 
 const APPT_STATUSES = [
   { value: "scheduled", label: "Scheduled", color: "#4A7AB5", bg: "#E8F0F8" },
@@ -107,6 +107,75 @@ const I = {
   refresh: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>,
   bell: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>,
   report: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>,
+  gear: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>,
+  send: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>,
+};
+
+// --- ICS Calendar Invite Generator --------------------------
+const generateICS = (appt, personName, doctorName, doctorPhone) => {
+  const pad = (n) => String(n).padStart(2, "0");
+  const dt = new Date(appt.date + "T" + (appt.time || "09:00"));
+  const end = new Date(dt.getTime() + 60 * 60 * 1000); // 1 hour
+  const fmt = (d) => `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}00`;
+  const now = fmt(new Date());
+  const uid = `caretrack-${appt.id}@caretrackapp`;
+  const summary = `${personName} - ${doctorName}${appt.reason ? ": " + appt.reason : ""}`;
+  const desc = [
+    `Patient: ${personName}`,
+    `Doctor: ${doctorName}`,
+    appt.reason ? `Reason: ${appt.reason}` : "",
+    doctorPhone ? `Phone: ${doctorPhone}` : "",
+    appt.notes ? `Notes: ${appt.notes}` : "",
+  ].filter(Boolean).join("\\n");
+
+  return [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//CareTrack//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:REQUEST",
+    "BEGIN:VEVENT",
+    `UID:${uid}`,
+    `DTSTAMP:${now}`,
+    `DTSTART:${fmt(dt)}`,
+    `DTEND:${fmt(end)}`,
+    `SUMMARY:${summary}`,
+    `DESCRIPTION:${desc}`,
+    "STATUS:CONFIRMED",
+    "END:VEVENT",
+    "END:VCALENDAR"
+  ].join("\r\n");
+};
+
+const sendCalendarInvites = (appt, contacts, personName, doctorName, doctorPhone, userEmail) => {
+  const ics = generateICS(appt, personName, doctorName, doctorPhone);
+  const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+  const icsUrl = URL.createObjectURL(blob);
+
+  const emails = contacts.map((c) => c.email).join(",");
+  const subject = encodeURIComponent(`Appointment: ${personName} with ${doctorName} on ${formatDate(appt.date)}`);
+  const body = encodeURIComponent(
+    `Hi,\n\nThis is a calendar invite for an upcoming appointment:\n\n` +
+    `Patient: ${personName}\n` +
+    `Doctor: ${doctorName}\n` +
+    `Date: ${formatDate(appt.date)}${appt.time ? " at " + appt.time : ""}\n` +
+    `${appt.reason ? "Reason: " + appt.reason + "\n" : ""}` +
+    `${doctorPhone ? "Phone: " + doctorPhone + "\n" : ""}\n` +
+    `Please find the calendar invite attached.\n\nSent from CareTrack`
+  );
+
+  // Download the ICS file first
+  const a = document.createElement("a");
+  a.href = icsUrl;
+  a.download = `appointment-${appt.date}.ics`;
+  a.click();
+
+  // Then open email client with the details
+  setTimeout(() => {
+    window.location.href = `mailto:${emails}?subject=${subject}&body=${body}`;
+  }, 500);
+
+  setTimeout(() => URL.revokeObjectURL(icsUrl), 5000);
 };
 
 // --- CSS -----------------------------------------------------
@@ -439,15 +508,19 @@ function DoctorForm({ doctor, people, onSave, onClose }) {
 }
 
 // --- Appointment Form ----------------------------------------
-function ApptForm({ appt, people, doctors, onSave, onClose }) {
+function ApptForm({ appt, people, doctors, contacts, onSave, onClose }) {
   const [f, setF] = useState({
     personId: appt?.personId || (people.length === 1 ? people[0].id : ""),
     doctorId: appt?.doctorId || "",
     date: appt?.date || "", time: appt?.time || "",
     status: appt?.status || "scheduled", reason: appt?.reason || "", notes: appt?.notes || "",
     linkedApptId: appt?.linkedApptId || "",
+    notifyContactIds: appt?.notifyContactIds || [],
   });
   const s = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  const toggleContact = (cid) => {
+    setF((p) => ({ ...p, notifyContactIds: p.notifyContactIds.includes(cid) ? p.notifyContactIds.filter((x) => x !== cid) : [...p.notifyContactIds, cid] }));
+  };
   // Filter doctors: show ones assigned to selected person first, then others
   const assignedDocs = f.personId ? doctors.filter((d) => (d.personIds || []).includes(f.personId)) : [];
   const otherDocs = f.personId ? doctors.filter((d) => !(d.personIds || []).includes(f.personId)) : doctors;
@@ -477,6 +550,19 @@ function ApptForm({ appt, people, doctors, onSave, onClose }) {
       </div>
       <div className="form-group"><label className="form-label">Reason</label><input className="form-input" value={f.reason} onChange={(e) => s("reason", e.target.value)} placeholder="e.g., Annual checkup" /></div>
       <div className="form-group"><label className="form-label">Notes</label><textarea className="form-textarea" value={f.notes} onChange={(e) => s("notes", e.target.value)} placeholder="Any notes..." /></div>
+      {contacts.length > 0 && (
+        <div className="form-group">
+          <label className="form-label">{I.send} Send Calendar Invite To</label>
+          <div className="person-pills" style={{ marginBottom: 0 }}>
+            {contacts.map((c) => (
+              <button key={c.id} type="button" className={`person-pill ${f.notifyContactIds.includes(c.id) ? "active" : ""}`} onClick={() => toggleContact(c.id)}>
+                {c.name}
+              </button>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>Tap contacts to send them a calendar invite</div>
+        </div>
+      )}
       <button className="btn btn-primary btn-full" onClick={save} disabled={!f.personId || !f.doctorId || !f.date} style={{ marginTop: 8 }}>{appt ? "Save Changes" : "Schedule Appointment"}</button>
     </Modal>
   );
@@ -707,7 +793,7 @@ function CareTrack() {
     (async () => {
       setLoading(true);
       const saved = await loadData(user.uid);
-      if (saved) setData({ ...DEFAULT_DATA, ...saved, dismissed: saved.dismissed || [] });
+      if (saved) setData({ ...DEFAULT_DATA, ...saved, dismissed: saved.dismissed || [], contacts: saved.contacts || [] });
       else setData(DEFAULT_DATA);
       setLoading(false);
     })();
@@ -736,7 +822,24 @@ function CareTrack() {
   const saveDoctor = (d) => { const exists = data.doctors.find((x) => x.id === d.id); save({ ...data, doctors: exists ? data.doctors.map((x) => x.id === d.id ? d : x) : [...data.doctors, d] }); setShowDoctorForm(null); };
   const deleteDoctor = (id) => { save({ ...data, doctors: data.doctors.filter((d) => d.id !== id) }); setConfirmDelete(null); };
 
-  const saveAppt = (a) => { const exists = data.appointments.find((x) => x.id === a.id); save({ ...data, appointments: exists ? data.appointments.map((x) => x.id === a.id ? a : x) : [...data.appointments, a] }); setShowApptForm(null); };
+  const saveContact = (c) => { const exists = (data.contacts || []).find((x) => x.id === c.id); save({ ...data, contacts: exists ? data.contacts.map((x) => x.id === c.id ? c : x) : [...(data.contacts || []), c] }); };
+  const deleteContact = (id) => { save({ ...data, contacts: (data.contacts || []).filter((c) => c.id !== id) }); };
+
+  const saveAppt = (a) => {
+    const exists = data.appointments.find((x) => x.id === a.id);
+    save({ ...data, appointments: exists ? data.appointments.map((x) => x.id === a.id ? a : x) : [...data.appointments, a] });
+    // Send calendar invites if contacts selected
+    if (a.notifyContactIds && a.notifyContactIds.length > 0 && a.status === "scheduled") {
+      const selectedContacts = (data.contacts || []).filter((c) => a.notifyContactIds.includes(c.id));
+      if (selectedContacts.length > 0) {
+        const pn = personName(a.personId);
+        const dn = doctorName(a.doctorId);
+        const doc = data.doctors.find((d) => d.id === a.doctorId);
+        sendCalendarInvites(a, selectedContacts, pn, dn, doc?.phone || "", user?.email || "");
+      }
+    }
+    setShowApptForm(null);
+  };
   const deleteAppt = (id) => { save({ ...data, appointments: data.appointments.filter((a) => a.id !== id) }); setConfirmDelete(null); };
 
   // --- Appointment status update handler ---------
@@ -1015,10 +1118,15 @@ function CareTrack() {
       <div className="header">
         <div className="header-top">
           <div><h1>CareTrack</h1><div className="header-subtitle">Medication & Care Manager</div></div>
-          <button className="header-bell" onClick={() => setTab("reminders")}>
-            {I.bell}
-            {activeReminders.length > 0 && <span className="header-bell-badge">{activeReminders.length}</span>}
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="header-bell" onClick={() => setTab("settings")} style={{ color: "var(--text-secondary)" }}>
+              {I.gear}
+            </button>
+            <button className="header-bell" onClick={() => setTab("reminders")}>
+              {I.bell}
+              {activeReminders.length > 0 && <span className="header-bell-badge">{activeReminders.length}</span>}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1256,6 +1364,55 @@ function CareTrack() {
           }
         </>)}
 
+        {/* === SETTINGS === */}
+        {tab === "settings" && (<>
+          <div className="section-header"><span className="section-title">Calendar Invite Contacts</span><span className="section-count">{(data.contacts || []).length}</span></div>
+          <div style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 16 }}>
+            Add people who should receive calendar invites when you create appointments. They'll get an .ics file they can add to any calendar app.
+          </div>
+
+          {(data.contacts || []).map((c) => (
+            <div className="card" key={c.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>{c.name}</div>
+                <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>{I.mail} {c.email}</div>
+              </div>
+              <div className="card-actions">
+                <button className="btn btn-ghost btn-sm" onClick={() => {
+                  const name = prompt("Contact name:", c.name);
+                  if (name === null) return;
+                  const email = prompt("Email address:", c.email);
+                  if (email === null) return;
+                  if (name.trim() && email.trim()) saveContact({ ...c, name: name.trim(), email: email.trim() });
+                }}>{I.edit}</button>
+                <button className="btn btn-ghost btn-sm" style={{ color: "#C0392B" }} onClick={() => deleteContact(c.id)}>{I.trash}</button>
+              </div>
+            </div>
+          ))}
+
+          <button className="btn btn-primary btn-full" style={{ marginTop: 12 }} onClick={() => {
+            const name = prompt("Contact name (e.g., Dad, Brother, Work Calendar):");
+            if (!name || !name.trim()) return;
+            const email = prompt("Email address:");
+            if (!email || !email.trim()) return;
+            saveContact({ id: genId(), name: name.trim(), email: email.trim() });
+          }}>{I.plus} Add Contact</button>
+
+          <div style={{ marginTop: 32, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
+            <div className="section-header"><span className="section-title">Account</span></div>
+            {user && (
+              <div className="card" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                {user.photoURL && <img src={user.photoURL} alt="" style={{ width: 40, height: 40, borderRadius: "50%" }} />}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{user.displayName || "User"}</div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{user.email}</div>
+                </div>
+                <button className="btn btn-secondary btn-sm" onClick={handleSignOut}>Sign Out</button>
+              </div>
+            )}
+          </div>
+        </>)}
+
         {/* === PEOPLE === */}
         {tab === "people" && (<>
           <div className="section-header"><span className="section-title">People</span><span className="section-count">{data.people.length}</span></div>
@@ -1292,7 +1449,7 @@ function CareTrack() {
       {showPersonForm !== null && <PersonForm person={showPersonForm || undefined} onSave={savePerson} onClose={() => setShowPersonForm(null)} />}
       {showMedForm !== null && <MedForm med={showMedForm || undefined} people={data.people} doctors={data.doctors} onSave={saveMed} onClose={() => setShowMedForm(null)} />}
       {showDoctorForm !== null && <DoctorForm doctor={showDoctorForm || undefined} people={data.people} onSave={saveDoctor} onClose={() => setShowDoctorForm(null)} />}
-      {showApptForm !== null && <ApptForm appt={showApptForm || undefined} people={data.people} doctors={data.doctors} onSave={saveAppt} onClose={() => setShowApptForm(null)} />}
+      {showApptForm !== null && <ApptForm appt={showApptForm || undefined} people={data.people} doctors={data.doctors} contacts={data.contacts || []} onSave={saveAppt} onClose={() => setShowApptForm(null)} />}
       {showCountUpdate && <CountModal med={showCountUpdate.med} mode={showCountUpdate.mode} onSave={saveMed} onClose={() => setShowCountUpdate(null)} />}
       {showApptUpdate && <ApptUpdatePrompt appt={showApptUpdate} personName={personName(showApptUpdate.personId)} doctorName={doctorName(showApptUpdate.doctorId)} onAction={(action) => handleApptAction(showApptUpdate, action)} onClose={() => setShowApptUpdate(null)} />}
       {confirmDelete && <Confirm
