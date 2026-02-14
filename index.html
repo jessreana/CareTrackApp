@@ -13,9 +13,28 @@
   <div id="root"></div>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
   <script type="text/babel">
 const { useState, useEffect, useCallback, useMemo } = React;
+
+// --- Firebase Setup ---
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAJ19IL4Ey-WRph5sPhRRR6LNfChU4poXY",
+  authDomain: "caretrackapp-3a238.firebaseapp.com",
+  projectId: "caretrackapp-3a238",
+  storageBucket: "caretrackapp-3a238.firebasestorage.app",
+  messagingSenderId: "1035316963864",
+  appId: "1:1035316963864:web:bfe52c81267a60d11e716d"
+};
+
+const fbApp = firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+const googleProvider = new firebase.auth.GoogleAuthProvider();
 
 // --- Utilities -----------------------------------------------
 const genId = () => Math.random().toString(36).slice(2, 10);
@@ -27,12 +46,12 @@ const addDays = (date, n) => {
   return d.toISOString().slice(0, 10);
 };
 const formatDate = (d) => {
-  if (!d) return "--";
+  if (!d) return "—";
   const dt = new Date(d + "T00:00:00");
   return dt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 };
 const formatDateTime = (d, t) => {
-  if (!d) return "--";
+  if (!d) return "—";
   let str = formatDate(d);
   if (t) str += ` at ${t}`;
   return str;
@@ -41,27 +60,20 @@ const isPast = (d) => d < today();
 const daysFromNow = (d) => daysBetween(today(), d);
 const fmtDate = formatDate;
 
-// --- Storage (localStorage for standalone deployment) -----
-const STORE_KEY = "caretrack-v3";
-const loadData = async () => {
+// --- Storage (Firestore - syncs across devices) -----
+const loadData = async (uid) => {
   try {
-    const raw = localStorage.getItem(STORE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
+    const snap = await db.collection("users").doc(uid).get();
+    return snap.exists ? snap.data() : null;
+  } catch (e) { console.error("Load failed", e); return null; }
 };
-const saveData = async (data) => {
+const saveData = async (data, uid) => {
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(data));
+    await db.collection("users").doc(uid).set(data);
   } catch (e) { console.error("Save failed", e); }
 };
-const migrateOld = async () => {
-  for (const k of ["caretrack-v2", "med-tracker-v1"]) {
-    try { const raw = localStorage.getItem(k); if (raw) return JSON.parse(raw); } catch {}
-  }
-  return null;
-};
 const groupBy = (arr, fn) => { const m = {}; arr.forEach((x) => { const k = fn(x); (m[k] = m[k] || []).push(x); }); return m; };
-const formatDateShort = (d) => { if (!d) return "--"; return new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
+const formatDateShort = (d) => { if (!d) return "—"; return new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
 
 const DEFAULT_DATA = { people: [], medications: [], doctors: [], appointments: [], dismissed: [] };
 
@@ -266,6 +278,16 @@ const STYLES = `
   .report-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--radius-sm);margin-bottom:4px;font-size:13px;background:var(--warm-white);border:1px solid var(--border)}
   .report-row-time{font-weight:700;color:var(--text-primary);min-width:60px;flex-shrink:0;font-size:12px}
   .report-row-info{flex:1;min-width:0}.report-row-status{flex-shrink:0}
+
+  .login-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:40px 20px;text-align:center;background:linear-gradient(180deg,#FFF8F0 0%,#FFE8D6 50%,#FFDCC1 100%)}
+  .login-title{font-family:'Lora',serif;font-size:32px;font-weight:600;color:var(--text-primary);margin-bottom:4px}
+  .login-sub{font-size:15px;color:var(--text-secondary);margin-bottom:40px}
+  .login-btn{display:flex;align-items:center;gap:12px;padding:14px 28px;border:2px solid var(--border);border-radius:50px;background:white;font-family:'Nunito',sans-serif;font-size:16px;font-weight:700;color:var(--text-primary);cursor:pointer;box-shadow:var(--shadow-md);transition:all 0.2s}
+  .login-btn:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg);border-color:var(--coral)}
+  .login-btn svg{flex-shrink:0}
+  .user-bar{display:flex;align-items:center;justify-content:space-between;padding:8px 16px;background:rgba(255,255,255,0.5);border-bottom:1px solid var(--border);font-size:12px;color:var(--text-secondary)}
+  .user-bar-info{display:flex;align-items:center;gap:8px}
+  .user-avatar{width:24px;height:24px;border-radius:50%;object-fit:cover}
   .appt-status-badge{display:inline-flex;align-items:center;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700}
 
   ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--peach-mid);border-radius:2px}
@@ -363,7 +385,7 @@ function MedForm({ med, people, doctors, onSave, onClose }) {
         <div className="form-group"><label className="form-label">Refill buffer (days)</label><input className="form-input" type="number" min="1" value={f.refillBuffer} onChange={(e) => s("refillBuffer", e.target.value)} /></div>
         <div className="form-group"><label className="form-label">Low supply (days)</label><input className="form-input" type="number" min="1" value={f.lowThreshold} onChange={(e) => s("lowThreshold", e.target.value)} /></div>
       </div>}
-      {doctors.length > 0 && <div className="form-group"><label className="form-label">Prescribing Doctor</label><select className="form-select" value={f.doctorId} onChange={(e) => s("doctorId", e.target.value)}><option value="">None</option>{doctors.map((d) => <option key={d.id} value={d.id}>{d.name}{d.specialty ? ` -- ${d.specialty}` : ""}</option>)}</select></div>}
+      {doctors.length > 0 && <div className="form-group"><label className="form-label">Prescribing Doctor</label><select className="form-select" value={f.doctorId} onChange={(e) => s("doctorId", e.target.value)}><option value="">None</option>{doctors.map((d) => <option key={d.id} value={d.id}>{d.name}{d.specialty ? ` — ${d.specialty}` : ""}</option>)}</select></div>}
       <div className="form-group"><label className="form-label">Purpose</label><input className="form-input" value={f.purpose} onChange={(e) => s("purpose", e.target.value)} placeholder="What it's for..." /></div>
       <div className="form-group"><label className="form-label">Instructions</label><textarea className="form-textarea" value={f.instructions} onChange={(e) => s("instructions", e.target.value)} placeholder="e.g., Take with food" /></div>
       <div className="form-group"><label className="form-label">Pharmacy</label><input className="form-input" value={f.pharmacy} onChange={(e) => s("pharmacy", e.target.value)} placeholder="e.g., CVS on Main St" /></div>
@@ -437,10 +459,10 @@ function ApptForm({ appt, people, doctors, onSave, onClose }) {
         <select className="form-select" value={f.doctorId} onChange={(e) => s("doctorId", e.target.value)}>
           <option value="">Select doctor...</option>
           {assignedDocs.length > 0 && <optgroup label={`${people.find((p) => p.id === f.personId)?.name || "Their"}'s Doctors`}>
-            {assignedDocs.map((d) => <option key={d.id} value={d.id}>{d.name}{d.specialty ? ` -- ${d.specialty}` : ""}</option>)}
+            {assignedDocs.map((d) => <option key={d.id} value={d.id}>{d.name}{d.specialty ? ` — ${d.specialty}` : ""}</option>)}
           </optgroup>}
           {otherDocs.length > 0 && <optgroup label={assignedDocs.length > 0 ? "Other Doctors" : "All Doctors"}>
-            {otherDocs.map((d) => <option key={d.id} value={d.id}>{d.name}{d.specialty ? ` -- ${d.specialty}` : ""}</option>)}
+            {otherDocs.map((d) => <option key={d.id} value={d.id}>{d.name}{d.specialty ? ` — ${d.specialty}` : ""}</option>)}
           </optgroup>}
         </select>
       </div>
@@ -468,9 +490,9 @@ function ApptUpdatePrompt({ appt, personName, doctorName, onAction, onClose }) {
         The appointment for <strong>{personName}</strong> with <strong>{doctorName}</strong> on <strong>{formatDate(appt.date)}</strong> hasn't been updated. What happened?
       </p>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <button className="btn btn-primary btn-full" onClick={() => onAction("completed")}>✅ Attended -- Mark Completed</button>
+        <button className="btn btn-primary btn-full" onClick={() => onAction("completed")}>✅ Attended — Mark Completed</button>
         <button className="btn btn-secondary btn-full" onClick={() => onAction("waiting_reschedule")}>🔄 Needs Rescheduling</button>
-        <button className="btn btn-secondary btn-full" onClick={() => onAction("reschedule_new")}>📅 Already Rescheduled -- Add New</button>
+        <button className="btn btn-secondary btn-full" onClick={() => onAction("reschedule_new")}>📅 Already Rescheduled — Add New</button>
         <button className="btn btn-danger btn-full" onClick={() => onAction("no_show")}>❌ No-Show</button>
       </div>
     </Modal>
@@ -487,7 +509,7 @@ function CountModal({ med, mode, onSave, onClose }) {
     else onSave({ ...med, currentCount: n });
   };
   return (
-    <Modal title={`${mode === "refill" ? "Log Refill" : "Adjust Count"} -- ${med.name}`} onClose={onClose}>
+    <Modal title={`${mode === "refill" ? "Log Refill" : "Adjust Count"} — ${med.name}`} onClose={onClose}>
       <div className="form-group"><label className="form-label">{mode === "refill" ? "Quantity received" : "Current pill count"}</label><input className="form-input" type="number" min="0" value={value} onChange={(e) => setValue(e.target.value)} autoFocus /></div>
       {mode === "refill" && <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 16 }}>Current ({med.currentCount || 0}) + refill ({value || 0}) = <strong>{(med.currentCount || 0) + (parseFloat(value) || 0)}</strong></p>}
       <button className="btn btn-primary btn-full" onClick={save}>Save</button>
@@ -645,6 +667,8 @@ function ApptCard({ appt, personName, doctorName, onEdit, onUpdateStatus }) {
 function CareTrack() {
   const [data, setData] = useState(DEFAULT_DATA);
   const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [tab, setTab] = useState("dashboard");
 
   // Modal states
@@ -668,20 +692,39 @@ function CareTrack() {
   const [rptDateFrom, setRptDateFrom] = useState("");
   const [rptDateTo, setRptDateTo] = useState("");
 
-  // Load
+  // Auth listener
   useEffect(() => {
+    const unsub = auth.onAuthStateChanged((u) => {
+      setUser(u);
+      setAuthLoading(false);
+    });
+    return () => unsub();
+  }, []);
+
+  // Load data when user signs in
+  useEffect(() => {
+    if (!user) { setLoading(false); return; }
     (async () => {
-      let saved = await loadData();
-      if (!saved) saved = await migrateOld();
+      setLoading(true);
+      const saved = await loadData(user.uid);
       if (saved) setData({ ...DEFAULT_DATA, ...saved, dismissed: saved.dismissed || [] });
+      else setData(DEFAULT_DATA);
       setLoading(false);
     })();
-  }, []);
+  }, [user]);
 
   const save = useCallback(async (newData) => {
     setData(newData);
-    await saveData(newData);
-  }, []);
+    if (user) await saveData(newData, user.uid);
+  }, [user]);
+
+  const handleSignIn = async () => {
+    try { await auth.signInWithPopup(googleProvider); } catch (e) { console.error("Sign in failed", e); }
+  };
+  const handleSignOut = async () => {
+    await auth.signOut();
+    setData(DEFAULT_DATA);
+  };
 
   // --- CRUD helpers ------------------------------
   const savePerson = (p) => { const exists = data.people.find((x) => x.id === p.id); save({ ...data, people: exists ? data.people.map((x) => x.id === p.id ? p : x) : [...data.people, p] }); setShowPersonForm(null); };
@@ -800,9 +843,9 @@ function CareTrack() {
         const daysLeft = Math.floor(med.currentCount / daily);
         const person = data.people.find((p) => p.id === med.personId);
         if (daysLeft <= (med.lowThreshold || 3))
-          list.push({ severity: "danger", type: "med", title: `${med.name} -- Critical!`, text: `${person?.name} has only ${daysLeft}d of supply left.`, id: med.id });
+          list.push({ severity: "danger", type: "med", title: `${med.name} — Critical!`, text: `${person?.name} has only ${daysLeft}d of supply left.`, id: med.id });
         else if (daysLeft <= (med.refillBuffer || 7))
-          list.push({ severity: "warn", type: "med", title: `${med.name} -- Refill Soon`, text: `${person?.name} should refill within ${daysLeft} days.`, id: med.id });
+          list.push({ severity: "warn", type: "med", title: `${med.name} — Refill Soon`, text: `${person?.name} should refill within ${daysLeft} days.`, id: med.id });
       }
     });
     return list;
@@ -851,7 +894,7 @@ function CareTrack() {
       .map((a) => ({
         severity: "warn", type: "reschedule",
         title: "Needs Rescheduling",
-        text: `${personName(a.personId)} with ${doctorName(a.doctorId)} -- still waiting to be rescheduled.`,
+        text: `${personName(a.personId)} with ${doctorName(a.doctorId)} — still waiting to be rescheduled.`,
         appt: a
       }));
   }, [data]);
@@ -933,15 +976,40 @@ function CareTrack() {
   const goToday = () => { const d = new Date(); setCalMonth({ year: d.getFullYear(), month: d.getMonth() }); setCalSelected(today()); };
   const selectedEvents = calData.events[calSelected] || [];
 
-  if (loading) return (
+  if (authLoading || loading) return (
     <div className="app" style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh" }}>
       <div style={{ textAlign: "center" }}><div style={{ color: "var(--coral)", opacity: 0.7, fontSize: 40, marginBottom: 12 }}>{I.heart}</div><div style={{ fontFamily: "'Lora',serif", fontSize: 18 }}>Loading CareTrack...</div></div>
+    </div>
+  );
+
+  if (!user) return (
+    <div className="app">
+      <style>{STYLES}</style>
+      <div className="login-screen">
+        <div style={{ color: "var(--coral)", opacity: 0.8, marginBottom: 20 }}><svg width="64" height="64" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg></div>
+        <div className="login-title">CareTrack</div>
+        <div className="login-sub">Medication & Care Manager</div>
+        <button className="login-btn" onClick={handleSignIn}>
+          <svg width="20" height="20" viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+          Sign in with Google
+        </button>
+        <div style={{ marginTop: 24, fontSize: 13, color: "var(--text-muted)", maxWidth: 280 }}>Your data syncs across all your devices. Sign in to get started.</div>
+      </div>
     </div>
   );
 
   return (
     <div className="app">
       <style>{STYLES}</style>
+
+      {/* User bar */}
+      <div className="user-bar">
+        <div className="user-bar-info">
+          {user.photoURL && <img className="user-avatar" src={user.photoURL} alt="" />}
+          <span>{user.displayName || user.email}</span>
+        </div>
+        <button className="btn btn-ghost btn-xs" onClick={handleSignOut}>Sign out</button>
+      </div>
 
       {/* Header */}
       <div className="header">
@@ -970,7 +1038,7 @@ function CareTrack() {
 
       <div className="content">
 
-        {/* === DASHBOARD -- Calendar View === */}
+        {/* === DASHBOARD — Calendar View === */}
         {tab === "dashboard" && (<>
           {data.people.length === 0 ? (
             <div className="empty-state">
